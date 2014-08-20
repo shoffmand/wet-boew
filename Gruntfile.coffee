@@ -6,9 +6,20 @@ module.exports = (grunt) ->
 	# External tasks
 	@registerTask(
 		"default"
-		"Default task that runs the production build"
+		"Default task that runs the core unminified build"
+		[
+			"build"
+			"demos"
+		]
+	)
+
+	@registerTask(
+		"travis"
+		"Default task that runs the core unminified build"
 		[
 			"dist"
+			"test-mocha"
+			"htmllint"
 		]
 	)
 
@@ -19,17 +30,10 @@ module.exports = (grunt) ->
 			"checkDependencies"
 			"test"
 			"build"
-			"assets-min"
+			"minify"
+			"pages:theme"
+			"pages:docs"
 			"demos-min"
-		]
-	)
-
-	@registerTask(
-		"debug"
-		"Produces unminified files"
-		[
-			"build"
-			"demos"
 		]
 	)
 
@@ -42,6 +46,16 @@ module.exports = (grunt) ->
 			"css"
 			"js"
 			"imagemin"
+		]
+	)
+
+	@registerTask(
+		"minify"
+		"Minify built files."
+		[
+			"js-min"
+			"css-min"
+			"assets-min"
 		]
 	)
 
@@ -68,7 +82,7 @@ module.exports = (grunt) ->
 		"Run tests on SauceLabs. Currently only for Travis builds"
 		[
 			"pre-mocha"
-			"saucelabs-custom"
+			"saucelabs-mocha"
 		]
 	)
 
@@ -107,6 +121,13 @@ module.exports = (grunt) ->
 			"concat:coreIE8"
 			"concat:pluginsIE8"
 			"concat:i18n"
+		]
+	)
+
+	@registerTask(
+		"js-min"
+		"INTERNAL: Minify the built Javascript files"
+		[
 			"uglify:polyfills"
 			"uglify:core"
 			"uglify:coreIE8"
@@ -124,6 +145,13 @@ module.exports = (grunt) ->
 			"autoprefixer"
 			"csslint:unmin"
 			"concat:css_addBanners"
+		]
+	)
+
+	@registerTask(
+		"css-min"
+		"INTERNAL: Minify the CSS files"
+		[
 			"cssmin:dist"
 			"cssmin:distIE8"
 			"ie8csscleaning"
@@ -142,10 +170,26 @@ module.exports = (grunt) ->
 		"demos"
 		"INTERNAL: Create unminified demos"
 		[
-			"i18n_csv:assemble"
 			"copy:demos"
 			"csslint:demos"
-			"pages"
+			"pages:demos"
+			"pages:ajax"
+		]
+	)
+
+	@registerTask(
+		"docs"
+		"INTERNAL: Create unminified docs"
+		[
+			"pages:docs"
+		]
+	)
+
+	@registerTask(
+		"theme"
+		"INTERNAL: Create unminified theme"
+		[
+			"pages:theme"
 		]
 	)
 
@@ -158,7 +202,6 @@ module.exports = (grunt) ->
 			"cssmin:demos_min"
 			"uglify:demos"
 			"pages:min"
-			"htmllint"
 		]
 	)
 
@@ -185,7 +228,7 @@ module.exports = (grunt) ->
 		"INTERNAL: prepare for running Mocha unit tests"
 		[
 			"copy:test"
-			"assemble:test"
+			"pages:test"
 			"connect:test"
 		]
 	)
@@ -201,9 +244,17 @@ module.exports = (grunt) ->
 					"useMinAssets"
 				);
 			else
-				# Only use a target path for assemble if pages recieved one too
+
+				if target != "test" and grunt.config("i18n_csv.assemble.locales") == undefined
+					grunt.task.run(
+						"i18n_csv:assemble"
+					)
+
+				# Only use a target path for assemble if pages received one too
 				target = if target then ":" + target else ""
-				grunt.task.run( "assemble" + target );
+				grunt.task.run(
+					"assemble" + target
+				);
 	)
 
 	@registerTask(
@@ -219,7 +270,7 @@ module.exports = (grunt) ->
 				( file ) ->
 					contents = grunt.file.read( file )
 					contents = contents.replace( /\/unmin/g, "" )
-					contents = contents.replace( /\"([^\"]*)?\.(js|css)\"/g, "\"$1.min.$2\"" )
+					contents = contents.replace( /\"(?!https:)([^\"]*)?\.(js|css)\"/g, "\"$1.min.$2\"" )
 
 					grunt.file.write(file, contents);
 			);
@@ -239,20 +290,23 @@ module.exports = (grunt) ->
 		glyphiconsBanner: "/*!\n * GLYPHICONS Halflings for Twitter Bootstrap by GLYPHICONS.com | Licensed under http://www.apache.org/licenses/LICENSE-2.0\n */"
 		i18nGDocsID: "0AqLc8VEIumBwdDNud1M2Wi1tb0RUSXJxSGp4eXI0ZXc"
 		i18nGDocsSheet: 1
-		mochaUrls: grunt.file.expand(
-						"src/test.js"
-						"src/**/test.js"
-						# Tests failing because they depend on demo page
-						"!src/plugins/data-inview/test.js"
-						"!src/other/feedback/test.js"
+		mochaUrls: grunt.file.expand({cwd: "src"}
+						"test.js"
+						"**/test.js"
 					).map( ( src ) ->
 						src = src.replace( /\\/g , "/" ) #" This is to escape a Sublime text regex issue in the replace
-						src = src.replace( "src/" , "" )
 						src = src.replace( "polyfills/" , "" )
 						src = src.replace( "plugins/" , "" )
 						src = src.replace( "other/" , "" )
 						src = src.replace( ".js" , "" )
-						return src
+						src
+					).sort( ( a, b) ->
+						if a is "test"
+								-1
+							else if a > b
+								1
+							else
+								-1
 					)
 
 		# Task configuration.
@@ -382,18 +436,19 @@ module.exports = (grunt) ->
 
 			theme:
 				options:
+					flatten: true
 					plugins: [
 						"assemble-contrib-i18n"
 					]
 					i18n:
 						languages: "<%= i18n_csv.assemble.locales %>"
 						templates: [
-							"theme/**/*.hbs"
+							"theme/site/pages/**/*.hbs"
 							# Don't run i18n transforms on language specific templates
 							"!theme/**/*-en.hbs"
 							"!theme/**/*-fr.hbs"
 						]
-				dest: "dist/unmin"
+				dest: "dist/unmin/theme/"
 				src: [
 					"theme/**/*-en.hbs"
 					"theme/**/*-fr.hbs"
@@ -456,14 +511,6 @@ module.exports = (grunt) ->
 				cwd: "site/pages"
 				src: [
 					"docs/**/*.hbs"
-				]
-				dest: "dist/unmin"
-				expand: true
-
-			versions:
-				cwd: "site/pages"
-				src: [
-					"docs/versions/**/*.hbs"
 				]
 				dest: "dist/unmin"
 				expand: true
@@ -800,9 +847,10 @@ module.exports = (grunt) ->
 						"The “details” element is not supported properly by browsers yet. It would probably be better to wait for implementations."
 						"The value of attribute “title” on element “a” from namespace “http://www.w3.org/1999/xhtml” is not in Unicode Normalization Form C." #required for vietnamese translations
 						"Text run is not in Unicode Normalization Form C." #required for vietnamese translations
+						"Start tag seen without seeing a doctype first. Expected “<!DOCTYPE html>”."
 					]
 				src: [
-					"dist/unmin/demos/cal-events/ajax/**/*.html"
+					"dist/unmin/demos/**/ajax/**/*.html"
 					"dist/unmin/assets/*.html"
 				]
 			all:
@@ -870,7 +918,7 @@ module.exports = (grunt) ->
 
 		copy:
 			bootstrap:
-				cwd: "lib/bootstrap-sass-official/vendor/assets/fonts/bootstrap"
+				cwd: "lib/bootstrap-sass-official/assets/fonts/bootstrap"
 				src: "*.*"
 				dest: "dist/unmin/fonts"
 				expand: true
@@ -1089,16 +1137,6 @@ module.exports = (grunt) ->
 				options:
 					livereload: true
 
-			versions:
-				files: [
-					"site/pages/docs/versions/**/*.hbs"
-				]
-				tasks: [
-					"pages:versions"
-				]
-				options:
-					livereload: true
-
 		jshint:
 			options:
 				jshintrc: ".jshintrc"
@@ -1183,18 +1221,24 @@ module.exports = (grunt) ->
 					reporter: "Spec"
 					urls: ["http://localhost:8000/dist/unmin/test/test.html"]
 
-		"saucelabs-custom":
+		"saucelabs-mocha":
 			all:
 				options:
 					urls: ["http://localhost:8000/dist/unmin/test/test.html"]
 					throttled: 3
 					browsers: grunt.file.readJSON "browsers.json"
-					testname: "WET-BOEW Travis Build #{process.env.TRAVIS_BUILD_NUMBER}"
+					testname: process.env.TRAVIS_COMMIT_MSG
+					build: process.env.TRAVIS_BUILD_NUMBER
 					tags: [
-						process.env.TRAVIS_BUILD_NUMBER
+						process.env.TRAVIS_JOB_ID
 						process.env.TRAVIS_BRANCH
 						process.env.TRAVIS_COMMIT
 					]
+					sauceConfig:
+						"video-upload-on-pass": false
+						"single-window": true
+						"record-screenshots": false
+						"capture-html": true
 
 		"gh-pages":
 			options:
@@ -1240,7 +1284,7 @@ module.exports = (grunt) ->
 	@loadNpmTasks "grunt-htmlcompressor"
 	@loadNpmTasks "grunt-i18n-csv"
 	@loadNpmTasks "grunt-imagine"
-	@loadNpmTasks "grunt-jscs-checker"
+	@loadNpmTasks "grunt-jscs"
 	@loadNpmTasks "grunt-mocha"
 	@loadNpmTasks "grunt-modernizr"
 	@loadNpmTasks "grunt-sass"
